@@ -130,12 +130,6 @@ int update_data(sqlite3 *db, const char *json_data)
     return MHD_HTTP_OK;
 }
 
-// DELETE
-#include <microhttpd.h>
-#include <sqlite3.h>
-#include <stdlib.h>
-#include <string.h>
-
 int delete_data(sqlite3 *db, int id)
 {
     char sql[256];
@@ -160,29 +154,126 @@ static int handle_request(void *cls, struct MHD_Connection *connection,
                           size_t *upload_data_size, void **con_cls)
 {
     sqlite3 *db = (sqlite3 *)cls;
+    char *json_response;
+    char *err_msg = NULL;
 
     if (strcmp(method, "GET") == 0)
     {
-        // GET
+        if (strcmp(url, "/") == 0) // root 경로에 대한 요청인 경우
+        {
+            // index.html 파일을 읽는다
+            FILE *file = fopen("index.html", "r");
+            if (file == NULL)
+            {
+                fprintf(stderr, "Cannot open index.html\n");
+                return MHD_NO;
+            }
+
+            fseek(file, 0, SEEK_END);
+            long filesize = ftell(file);
+            fseek(file, 0, SEEK_SET);
+
+            char *filedata = malloc(filesize + 1);
+            fread(filedata, 1, filesize, file);
+            fclose(file);
+            filedata[filesize] = '\0';
+
+            // 응답 생성 및 반환
+            struct MHD_Response *response = MHD_create_response_from_buffer(filesize, (void*)filedata, MHD_RESPMEM_MUST_FREE);
+            int ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
+            MHD_destroy_response(response);
+
+            return ret;
+        }
+        else
+        {
+            // URL에서 ID 추출 
+            int id = atoi(url + 1); // url의 첫번째 문자 '/' 제거
+            int result = read_data(db, id, &json_response);
+
+            if (result != MHD_HTTP_OK)
+            {
+                return MHD_NO;
+            }
+
+            // 응답 생성 및 반환
+            struct MHD_Response *response = MHD_create_response_from_buffer(strlen(json_response), (void*)json_response, MHD_RESPMEM_MUST_FREE);
+            int ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
+            MHD_destroy_response(response);
+
+            return ret;
+        }
     }
     else if (strcmp(method, "POST") == 0)
     {
-        // POST
-        // upload_data에서 JSON 데이터 추출 및 create_data 함수 호출
-    }
+    // POST
+        if (*upload_data_size != 0)
+        {
+            char name[256], school[256];
+            int age, isProtected;
+
+            sscanf(upload_data, "name=%s&age=%d&school=%s&isProtected=%d", name, &age, school, &isProtected);
+
+            // SQL 쿼리 구성 및 실행
+            char *sql = sqlite3_mprintf("INSERT INTO data (name, age, school, isProtected) VALUES (%Q, %d, %Q, %d)",
+                                        name, age, school, isProtected);
+
+            int rc = sqlite3_exec(db, sql, 0, 0, &err_msg);
+            sqlite3_free(sql);
+
+            if (rc != SQLITE_OK)
+            {
+                fprintf(stderr, "SQL error: %s\n", err_msg);
+                sqlite3_free(err_msg);
+                return MHD_NO; // SQLite 실행 에러
+            }
+
+            *upload_data_size = 0;
+            return MHD_YES;
+        }
+        else
+        {
+            return MHD_NO;
+        }
+    }      
+
     else if (strcmp(method, "PUT") == 0)
     {
         // PUT
-        // upload_data에서 JSON 데이터 추출 및 update_data 함수 호출
+        if (*upload_data_size != 0)
+        {
+            update_data(db, upload_data);
+            *upload_data_size = 0;
+            return MHD_YES;
+        }
+        else
+        {
+            return MHD_NO;
+        }
     }
     else if (strcmp(method, "DELETE") == 0)
     {
         // DELETE
-        // URL에서 ID 추출 및 delete_data 함수 호출
+        // URL에서 ID 추출 
+        int id = atoi(url + 1); // url의 첫번째 문자 '/' 제거
+        int result = delete_data(db, id);
+
+        if (result != MHD_HTTP_OK)
+        {
+            return MHD_NO;
+        }
+
+        // 삭제 성공 응답 생성 및 반환
+        struct MHD_Response *response = MHD_create_response_from_buffer(0, "", MHD_RESPMEM_PERSISTENT);
+        int ret = MHD_queue_response(connection, MHD_HTTP_OK, response);
+        MHD_destroy_response(response);
+
+        return ret;
     }
     else
     {
         // 예외처리
+        return MHD_NO;
     }
 
     return MHD_YES;
