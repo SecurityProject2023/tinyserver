@@ -1,7 +1,4 @@
 # TinyServer  
 ---  
-C Server  
-
-## Build  
----  
-`gcc -O0 -fno-stack-protector -o server servermain.c -lsqlite3 -lmicrohttpd -ljson-c`  
+Mini C++ Server  
+for 2023 sunrin security project  
